@@ -7,13 +7,20 @@ from datetime import datetime
 import logging
 import re
 from typing import Tuple, List, Union
+from textwrap import dedent
+from pytz import timezone
 
 SKATE_SCHEDULE_URL = "http://web.mit.edu/athletics/www/skateschedule.pdf"
+EST5EDT = timezone("EST5EDT")
 
 
-def calendar_test():
+def as_caldav_timestamp(time: datetime):
+    return datetime.utcfromtimestamp(time.timestamp()).strftime("%Y%m%dT%H%M%SZ")
+
+
+def publish_events(events):
     caldav_url = "http://localhost:8000/"
-    calendar_url = "http://localhost:8000/user1/c3499118-8178-e872-7330-0847cb7824a2/"
+    calendar_url = "http://localhost:8000/user1/519e83f2-512d-a940-1785-7fc38636e64b/"
     username = "user1"
     password = "foobar"
 
@@ -36,21 +43,46 @@ def calendar_test():
         exit()
 
     ## Let's add an event to our newly created calendar
-    mycal.save_event(
-        """BEGIN:VCALENDAR
-    VERSION:2.0
-    PRODID:-//Example Corp.//CalDAV Client//EN
-    BEGIN:VEVENT
-    UID:foobar
-    DTSTAMP:20200516T060000Z
-    DTSTART:20200517T060000Z
-    DTEND:20200517T230000Z
-    RRULE:FREQ=YEARLY
-    SUMMARY:Do the needful
-    END:VEVENT
-    END:VCALENDAR
-    """
-    )
+    for event in events:
+        title = event[0]
+        dtstart, dtend = [as_caldav_timestamp(time) for time in event[1:]]
+        mycal.save_event(
+            dedent(
+                f"""
+                BEGIN:VCALENDAR
+                VERSION:2.0
+                PRODID:-//MIT Skating Calendar//MIT Skating Calendar Client//EN
+                BEGIN:VTIMEZONE
+                TZID:US-Eastern
+                BEGIN:STANDARD
+                DTSTART:19671029T020000
+                RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10
+                TZOFFSETFROM:-0400
+                TZOFFSETTO:-0500
+                TZNAME:Eastern Standard Time (US &amp; Canada)
+                END:STANDARD
+                BEGIN:DAYLIGHT
+                DTSTART:19870405T020000
+                RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=4
+                TZOFFSETFROM:-0500
+                TZOFFSETTO:-0400
+                TZNAME:Eastern Daylight Time (US &amp; Canada)
+                END:DAYLIGHT
+                END:VTIMEZONE
+                BEGIN:VEVENT
+                UID:{dtstart}-{dtend}-{title.replace(" ", "-")}
+                TZID:US-Eastern
+                TZNAME:Eastern Standard Time (US & Canada)
+                DTSTAMP:{dtstart}
+                DTSTART:{dtstart}
+                DTEND:{dtend}
+                SUMMARY:{title}
+                DESCRIPTION:Skating! Automatically generated events based on http://web.mit.edu/athletics/www/skateschedule.pdf
+                END:VEVENT
+                END:VCALENDAR
+                """
+            )
+        )
 
     print(mycal.name, mycal.url, mycal.events())
 
@@ -105,46 +137,10 @@ MONTH_MAP = {
     "dec": 12,
 }
 
-def pdf_test2():
-    r = requests.get(SKATE_SCHEDULE_URL, stream=True)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
-        print(len(r.content))
-        f.write(r.content)
-        filename = f.name
-    print(filename)
-    tables = camelot.read_pdf(filename)[0].data[1:]
-    # Flatten and don't include empty strings
-    day_strs = [cell for row in tables for cell in row if len(cell) > 0]
-    month = None
-    for day_str in day_strs:
-        try:
-            day_split = day_str.split("\n")
-            day = day_split[0].split()
-            # Take month out of day if necessary
-            if len(day) > 1:
-                month = MONTH_MAP.get(day[-2].lower(), month)
-            if month == None:
-                raise ValueError("Unknown month")
-            day = int(day[-1][:2])
-            now = datetime.now().replace(month=month, day=day, second=0, microsecond=0)
-            formatted = now.strftime("%Y%m%dT%H%M%SZ")
-            print(repr(day_split))
-            print(f"{day_str} -> {now}")
-            event_name = None
-            for line in day_split[1:]:
-                cleaned = line.replace("–", "-").strip()
-                if "-" in cleaned and event_name:
-                    # Common typeos
-                    cleaned = cleaned.lower()
-                    print(
-                        f"{repr(event_name.strip())}: {parse_time_range(now, cleaned)}"
-                    )
-                else:
-                    event_name = cleaned
-        except Exception as e:
-            logging.exception(f"Failed to parse {repr(day_str)} with exception {e}")
 
-def events_from_cell(cell: str, month: Union[int, None]) -> Tuple[List[Tuple[str, datetime, datetime]], Union[int, None]]:
+def events_from_cell(
+    cell: str, month: Union[int, None]
+) -> Tuple[List[Tuple[str, datetime, datetime]], Union[int, None]]:
     # Split cell into lines
     cell_lines = cell.split("\n")
 
@@ -162,7 +158,7 @@ def events_from_cell(cell: str, month: Union[int, None]) -> Tuple[List[Tuple[str
     day = int(day_header[-1][:2])
 
     # Create a datetime with the current year
-    now = datetime.now().replace(month=month, day=day, second=0, microsecond=0)
+    now = datetime.now(EST5EDT).replace(month=month, day=day, second=0, microsecond=0)
 
     # Keep track of the event_name
     event_name = None
@@ -180,6 +176,7 @@ def events_from_cell(cell: str, month: Union[int, None]) -> Tuple[List[Tuple[str
             event_name = cleaned
     return events, month
 
+
 def fetch_table_data():
     r = requests.get(SKATE_SCHEDULE_URL, stream=True)
 
@@ -190,6 +187,7 @@ def fetch_table_data():
 
     # Flatten and don't include empty strings
     return [cell for row in table for cell in row if len(cell) > 0]
+
 
 def main():
     data = fetch_table_data()
@@ -203,10 +201,8 @@ def main():
             all_events.extend(events)
         except Exception as e:
             logging.exception(f"Failed to parse {repr(cell)} with exception {e}")
-    # TODO: publish_events(all_events)
-    print(all_events)
+    publish_events(all_events)
+
 
 if __name__ == "__main__":
-    # calendar_test()
-    # pdf_test2()
     main()
