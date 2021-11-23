@@ -7,4 +7,15 @@ services:
     ports: 
       - "8000:8000"
     volumes: 
-      - ./radicale:/var/radicale
+      - ./radicale_config:/var/radicale
+      - ./radicale_data:/var/radicale_data
+
+  calendar-update:
+    image: mit-skate-cal:latest
+    environment:
+      - CALDAV_URL=http://radicale:8000
+      - CALDAV_USERNAME=root
+    env_file:
+      - ./config.env
+    depends_on:
+      - radicale

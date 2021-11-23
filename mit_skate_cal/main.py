@@ -1,17 +1,23 @@
 #!/usr/bin/env python3.9
-import caldav
-import requests
-import tempfile
-import camelot
-from datetime import datetime
 import logging
+import os
 import re
-from typing import Tuple, List, Union
+import tempfile
+from datetime import datetime
 from textwrap import dedent
+from typing import List, Tuple, Union
+
+import caldav
+import camelot
+import requests
 from pytz import timezone
 
 SKATE_SCHEDULE_URL = "http://web.mit.edu/athletics/www/skateschedule.pdf"
 EST5EDT = timezone("EST5EDT")
+CALDAV_URL = os.environ['CALDAV_URL']
+CALENDAR_ID = os.environ['CALENDAR_ID']
+CALDAV_USERNAME = os.environ['CALDAV_USERNAME']
+CALDAV_PASSWORD = os.environ['CALDAV_PASSWORD']
 
 
 def as_caldav_timestamp(time: datetime):
@@ -19,28 +25,9 @@ def as_caldav_timestamp(time: datetime):
 
 
 def publish_events(events):
-    caldav_url = "http://localhost:8000/"
-    calendar_url = "http://localhost:8000/user1/519e83f2-512d-a940-1785-7fc38636e64b/"
-    username = "user1"
-    password = "foobar"
+    client = caldav.DAVClient(url=CALDAV_URL, username=CALDAV_USERNAME, password=CALDAV_PASSWORD)
 
-    client = caldav.DAVClient(url=caldav_url, username=username, password=password)
-
-    mycal = caldav.Calendar(client=client, url=calendar_url)
-    my_principal = client.principal()
-
-    calendars = my_principal.calendars()
-
-    if calendars:
-        ## Some calendar servers will include all calendars you have
-        ## access to in this list, and not only the calendars owned by
-        ## this principal.
-        print("your principal has %i calendars:" % len(calendars))
-        for c in calendars:
-            print("    Name: %-20s  URL: %s" % (c.name, c.url))
-    else:
-        print("your principal has no calendars")
-        exit()
+    mycal = caldav.Calendar(client=client, url=f"{CALDAV_URL}/{CALDAV_USERNAME}/{CALENDAR_ID}/")
 
     ## Let's add an event to our newly created calendar
     for event in events:
